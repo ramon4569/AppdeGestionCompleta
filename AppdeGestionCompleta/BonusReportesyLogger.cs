@@ -87,6 +87,31 @@ namespace AppdeGestionCompleta
             sb.AppendLine(separator);
             return sb.ToString();
         }
+
+        public static string GenerarReporteProfesores(IEnumerable<Profesor> profesores)
+        {
+            if (!profesores.Any()) return "No hay profesores para mostrar.";
+
+            var sb = new StringBuilder();
+            int idWidth = 12;
+            int nameWidth = 25;
+            int deptoWidth = 20;
+            int salarioWidth = 15;
+            string separator = new string('-', idWidth + nameWidth + deptoWidth + salarioWidth + 10);
+
+            sb.AppendLine(separator);
+            sb.AppendLine($"| {"ID".PadRight(idWidth)} | {"Nombre Completo".PadRight(nameWidth)} | {"Departamento".PadRight(deptoWidth)} | {"Salario".PadRight(salarioWidth)} |");
+            sb.AppendLine(separator);
+
+            foreach (var prof in profesores)
+            {
+                string nombreCompleto = $"{prof.Nombre} {prof.Apellido}";
+                // Usamos "C0" para formato de Moneda (ej: $50,000)
+                sb.AppendLine($"| {prof.Identificacion.PadRight(idWidth)} | {nombreCompleto.PadRight(nameWidth)} | {prof.Departamento.PadRight(deptoWidth)} | {prof.Salario.ToString("C0").PadRight(salarioWidth)} |");
+            }
+            sb.AppendLine(separator);
+            return sb.ToString();
+        }
     }
 
     #endregion

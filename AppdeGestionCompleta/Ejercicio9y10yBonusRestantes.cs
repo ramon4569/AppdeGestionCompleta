@@ -1,4 +1,5 @@
 ﻿
+
 using System;
 using System.Collections.Generic;
 using System.Globalization; // Para formatos
@@ -7,14 +8,437 @@ using System.Linq; // Para LINQ
 using System.Reflection; // Para Reflection
 using System.Text; // Para StringBuilder
 using System.Text.Json; // BONUS: Para Serialización
+using System.Text.Json.Serialization; // BONUS: Para ReferenceHandler
 using System.Text.RegularExpressions; // Para Atributo [Formato]
-using System.Threading; // BONUS: Para Pausas 
+using System.Threading; // BONUS: Para Pausas
 
 // El namespace principal que envuelve toda la aplicación
-namespace AppdeGestionCompleta
+namespace SistemaGestionAcademica_FINAL
 {
-   
-   
+    // =====================================================================
+    // =====================================================================
+    #region EJERCICIOS 1-8: LÓGICA DE NEGOCIO (BACKEND)
+    // =====================================================================
+    // =====================================================================
+
+    #region Ejercicio 1: Jerarquía de Clases (Persona, Estudiante, Profesor)
+
+    public abstract class Persona : IIdentificable
+    {
+        [Requerido] public string Identificacion { get; set; }
+        [Requerido] public string Nombre { get; set; }
+        [Requerido] public string Apellido { get; set; }
+        public DateTime FechaNacimiento { get; set; }
+        public int Edad { get { return DateTime.Today.Year - FechaNacimiento.Year; } }
+        public Persona(string id, string nom, string ape, DateTime fechaNac)
+        { Identificacion = id; Nombre = nom; Apellido = ape; FechaNacimiento = fechaNac; }
+        public abstract string ObtenerRol();
+        public override string ToString() => $"[{Identificacion}] {Nombre} {Apellido} (Rol: {ObtenerRol()})";
+    }
+
+    public class Profesor : Persona
+    {
+        public string Departamento { get; set; }
+        [ValidacionRango(30000, 150000)] public decimal Salario { get; set; }
+        public Profesor(string id, string nom, string ape, DateTime fechaNac, string depto)
+            : base(id, nom, ape, fechaNac)
+        {
+            if (Edad < 25) throw new ArgumentException("Profesor debe tener al menos 25 años.");
+            Departamento = depto;
+        }
+        public override string ObtenerRol() => "Profesor";
+    }
+
+    public class Estudiante : Persona
+    {
+        [Requerido] public string Carrera { get; set; }
+        [Formato(@"^\d{4}-\d{4}$")] public string NumeroMatricula { get; set; }
+        public Estudiante(string id, string nom, string ape, DateTime fechaNac, string carrera, string matricula)
+            : base(id, nom, ape, fechaNac)
+        {
+            if (Edad < 15) throw new ArgumentException("Estudiante debe tener al menos 15 años.");
+            Carrera = carrera; NumeroMatricula = matricula;
+        }
+        public override string ObtenerRol() => "Estudiante";
+    }
+    #endregion
+
+    #region Ejercicio 2: Interfaces y Clases de Cursos (IEvaluable, Curso, Matricula)
+
+    public interface IEvaluable
+    {
+        void AgregarCalificacion(decimal calificacion);
+        decimal ObtenerPromedio();
+        bool HaAprobado();
+    }
+
+    public class Curso : IIdentificable
+    {
+        [Requerido][Formato(@"^[A-Z]{2,3}-\d{3}$")] public string Codigo { get; set; }
+        [Requerido] public string Nombre { get; set; }
+        [ValidacionRango(1, 6)] public int Creditos { get; set; }
+        public Profesor ProfesorAsignado { get; set; }
+        public string Identificacion => Codigo;
+    }
+
+    public class Matricula : IEvaluable
+    {
+        public Estudiante Estudiante { get; set; }
+        public Curso Curso { get; set; }
+        private List<decimal> Calificaciones = new List<decimal>();
+        private const decimal NotaMinimaAprobatoria = 7.0m;
+        public Matricula(Estudiante est, Curso cur) { Estudiante = est; Curso = cur; }
+        public void AgregarCalificacion(decimal calificacion)
+        {
+            if (calificacion < 0 || calificacion > 10) throw new ArgumentException("Calificación debe estar entre 0 y 10.");
+            Calificaciones.Add(calificacion);
+        }
+        public decimal ObtenerPromedio() => Calificaciones.Count == 0 ? 0 : Calificaciones.Average();
+        public bool HaAprobado() => ObtenerPromedio() >= NotaMinimaAprobatoria;
+        public string ObtenerEstado() => Calificaciones.Count == 0 ? "En Curso" : (HaAprobado() ? "Aprobado" : "Reprobado");
+    }
+    #endregion
+
+    #region Ejercicio 3: Repositorio Genérico (IIdentificable, Repositorio<T>)
+
+    public interface IIdentificable { string Identificacion { get; } }
+
+    public class Repositorio<T> where T : IIdentificable
+    {
+        private Dictionary<string, T> _elementos = new Dictionary<string, T>();
+
+        public void Agregar(T item)
+        {
+            if (_elementos.ContainsKey(item.Identificacion)) throw new ArgumentException($"ID duplicado: {item.Identificacion}");
+            _elementos.Add(item.Identificacion, item);
+            Logger.Log($"Elemento agregado al repositorio {typeof(T).Name}: {item.Identificacion}"); // <-- BONUS LOG
+        }
+
+        public T BuscarPorId(string id)
+        {
+            _elementos.TryGetValue(id, out T item);
+            return item;
+        }
+
+        public bool Eliminar(string id)
+        {
+            bool eliminado = _elementos.Remove(id);
+            if (eliminado) Logger.Log($"Elemento eliminado del repositorio {typeof(T).Name}: {id}"); // <-- BONUS LOG
+            return eliminado;
+        }
+
+        public IEnumerable<T> ObtenerTodos() => _elementos.Values;
+
+        public IEnumerable<T> Buscar(Func<T, bool> predicado) => _elementos.Values.Where(predicado);
+    }
+    #endregion
+
+    #region Ejercicio 4 y 7: Gestor Central y LINQ (GestorMatriculas)
+
+    public partial class GestorMatriculas
+    {
+        private List<Matricula> _listaGeneralMatriculas = new List<Matricula>();
+        private readonly Repositorio<Estudiante> _repoEstudiantes;
+        private readonly Repositorio<Profesor> _repoProfesores;
+        private readonly Repositorio<Curso> _repoCursos;
+
+        public GestorMatriculas(Repositorio<Estudiante> rE, Repositorio<Profesor> rP, Repositorio<Curso> rC)
+        {
+            _repoEstudiantes = rE; _repoProfesores = rP; _repoCursos = rC;
+        }
+
+        public void MatricularEstudiante(Estudiante est, Curso curso)
+        {
+            bool yaExiste = _listaGeneralMatriculas.Any(m => m.Estudiante.Identificacion == est.Identificacion && m.Curso.Codigo == curso.Codigo);
+            if (yaExiste) throw new InvalidOperationException("Estudiante ya matriculado.");
+            _listaGeneralMatriculas.Add(new Matricula(est, curso));
+            Logger.Log($"Estudiante {est.Identificacion} matriculado en {curso.Codigo}."); // <-- BONUS LOG
+        }
+
+        public void MatricularEstudiante(string idEstudiante, string codigoCurso)
+        {
+            var est = _repoEstudiantes.BuscarPorId(idEstudiante);
+            if (est == null) throw new KeyNotFoundException("Estudiante no encontrado.");
+            var curso = _repoCursos.BuscarPorId(codigoCurso);
+            if (curso == null) throw new KeyNotFoundException("Curso no encontrado.");
+            MatricularEstudiante(est, curso);
+        }
+
+        public void AgregarCalificacion(string idEstudiante, string codigoCurso, decimal calificacion)
+        {
+            var matricula = _listaGeneralMatriculas.FirstOrDefault(m => m.Estudiante.Identificacion == idEstudiante && m.Curso.Codigo == codigoCurso);
+            if (matricula == null) throw new KeyNotFoundException("Matrícula no encontrada.");
+            matricula.AgregarCalificacion(calificacion);
+            Logger.Log($"Calificación {calificacion} agregada a {idEstudiante} en {codigoCurso}."); // <-- BONUS LOG
+        }
+
+        public string GenerarReporteEstudiante(string idEstudiante)
+        {
+            var matriculas = _listaGeneralMatriculas.Where(m => m.Estudiante.Identificacion == idEstudiante);
+            if (!matriculas.Any()) throw new KeyNotFoundException("Estudiante no encontrado o sin matrículas.");
+
+            var est = matriculas.First().Estudiante;
+            var reporte = new StringBuilder();
+            reporte.AppendLine($"--- REPORTE ACADÉMICO: {est.Nombre} {est.Apellido} ---");
+            foreach (var m in matriculas)
+            {
+                reporte.AppendLine($"  > Curso: {m.Curso.Nombre} | Promedio: {m.ObtenerPromedio():F2} | Estado: {m.ObtenerEstado()}");
+            }
+            return reporte.ToString();
+        }
+    }
+
+    public partial class GestorMatriculas
+    {
+        public IEnumerable<dynamic> ObtenerTop10Estudiantes()
+        {
+            return _listaGeneralMatriculas.GroupBy(m => m.Estudiante)
+                .Select(g => new { Estudiante = g.Key, PromedioGeneral = g.Average(m => m.ObtenerPromedio()) })
+                .OrderByDescending(x => x.PromedioGeneral).Take(10);
+        }
+
+        public IEnumerable<Estudiante> ObtenerEstudiantesEnRiesgo()
+        {
+            return _listaGeneralMatriculas.GroupBy(m => m.Estudiante)
+                .Where(g => g.Average(m => m.ObtenerPromedio()) < 7.0m)
+                .Select(g => g.Key);
+        }
+
+        public IEnumerable<dynamic> ObtenerCursosMasPopulares()
+        {
+            return _listaGeneralMatriculas.GroupBy(m => m.Curso.Nombre)
+                .Select(g => new { Curso = g.Key, CantidadEstudiantes = g.Count() })
+                .OrderByDescending(x => x.CantidadEstudiantes);
+        }
+
+        public decimal ObtenerPromedioGeneral()
+        {
+            var promedios = _listaGeneralMatriculas.GroupBy(m => m.Estudiante)
+                               .Select(g => g.Average(m => m.ObtenerPromedio()));
+            return promedios.Any() ? promedios.Average() : 0;
+        }
+
+        public string ObtenerEstadisticasPorCarrera()
+        {
+            var reporte = new StringBuilder();
+            reporte.AppendLine("--- Estadísticas por Carrera ---");
+            var grupos = _listaGeneralMatriculas.GroupBy(m => m.Estudiante.Carrera);
+            foreach (var g in grupos)
+            {
+                var estUnicos = g.Select(m => m.Estudiante).Distinct().Count();
+                var promCarrera = g.GroupBy(m => m.Estudiante).Select(gEst => gEst.Average(m => m.ObtenerPromedio())).Average();
+                reporte.AppendLine($"   > {g.Key}: {estUnicos} Estudiantes | Promedio General: {promCarrera:F2}");
+            }
+            return reporte.ToString();
+        }
+
+        public IEnumerable<Estudiante> BuscarEstudiantes(Func<Estudiante, bool> criterio)
+        {
+            return _repoEstudiantes.Buscar(criterio);
+        }
+    }
+    #endregion
+
+    #region Ejercicio 6: Reflection (AnalizadorReflection)
+
+    public class AnalizadorReflection
+    {
+        public void MostrarPropiedades(Type tipo)
+        {
+            Console.WriteLine($"\n--- Propiedades Públicas de [{tipo.Name}] ---");
+            PropertyInfo[] propiedades = tipo.GetProperties();
+            foreach (var prop in propiedades) { Console.WriteLine($"   > {prop.Name} (Tipo: {prop.PropertyType.Name})"); }
+        }
+
+        public void MostrarMetodos(Type tipo)
+        {
+            Console.WriteLine($"\n--- Métodos Públicos de [{tipo.Name}] ---");
+            MethodInfo[] metodos = tipo.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            if (metodos.Length == 0) { Console.WriteLine("   > (No se encontraron métodos públicos declarados)"); return; }
+            foreach (var met in metodos) { Console.WriteLine($"   > {met.Name}()"); }
+        }
+    }
+    #endregion
+
+    #region Ejercicio 8: Atributos Personalizados y Validador
+
+    [AttributeUsage(AttributeTargets.Property)]
+    public class RequeridoAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Property)]
+    public class ValidacionRangoAttribute : Attribute
+    {
+        public double Min { get; }
+        public double Max { get; }
+        public ValidacionRangoAttribute(double min, double max) { Min = min; Max = max; }
+    }
+
+    [AttributeUsage(AttributeTargets.Property)]
+    public class FormatoAttribute : Attribute
+    {
+        public string Pattern { get; }
+        public FormatoAttribute(string pattern) { Pattern = pattern; }
+    }
+
+    public class Validador
+    {
+        public List<string> Validar(object instancia)
+        {
+            var errores = new List<string>();
+            Type tipo = instancia.GetType();
+            foreach (var prop in tipo.GetProperties())
+            {
+                object valor = prop.GetValue(instancia);
+                foreach (var attr in prop.GetCustomAttributes(true))
+                {
+                    if (attr is RequeridoAttribute)
+                    {
+                        if (valor == null || (valor is string s && string.IsNullOrWhiteSpace(s)))
+                            errores.Add($"[Requerido] '{prop.Name}' no puede ser nulo o vacío.");
+                    }
+                    else if (attr is ValidacionRangoAttribute rango)
+                    {
+                        if (valor != null)
+                        {
+                            try
+                            {
+                                double valNum = Convert.ToDouble(valor);
+                                if (valNum < rango.Min || valNum > rango.Max)
+                                    errores.Add($"[Rango] '{prop.Name}' ({valNum}) fuera de rango ({rango.Min}-{rango.Max}).");
+                            }
+                            catch (Exception) { /* Ignorar si no es numérico */ }
+                        }
+                    }
+                    else if (attr is FormatoAttribute formato)
+                    {
+                        if (valor is string s && !string.IsNullOrEmpty(s) && !Regex.IsMatch(s, formato.Pattern))
+                            errores.Add($"[Formato] '{prop.Name}' ('{s}') no cumple el formato '{formato.Pattern}'.");
+                    }
+                }
+            }
+            return errores;
+        }
+    }
+    #endregion
+
+    #endregion
+
+    // =====================================================================
+    // =====================================================================
+    #region BONUS: CLASES DE SOPORTE (Logger, Reportes)
+    // =====================================================================
+    // =====================================================================
+
+    /// <summary>
+    /// BONUS: Clase estática simple para registrar eventos del sistema.
+    /// </summary>
+    public static class Logger
+    {
+        private static readonly string _logFile = "sistema_academico.log";
+        private static readonly object _lock = new object(); // Para evitar colisiones al escribir
+
+        public static void Log(string mensaje, string nivel = "INFO")
+        {
+            try
+            {
+                // lock asegura que solo un hilo pueda escribir en el archivo a la vez
+                lock (_lock)
+                {
+                    // Formato: [2025-11-06 10:30:01] [INFO] - Mensaje de log.
+                    string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{nivel.ToUpper()}] - {mensaje}{Environment.NewLine}";
+                    File.AppendAllText(_logFile, logEntry);
+                }
+            }
+            catch (Exception)
+            {
+                // No detener la aplicación si falla el log
+            }
+        }
+    }
+
+    /// <summary>
+    /// BONUS: Clase estática para generar reportes en formato de tabla de texto.
+    /// </summary>
+    public static class GeneradorReportes
+    {
+        public static string GenerarReporteEstudiantes(IEnumerable<Estudiante> estudiantes)
+        {
+            if (!estudiantes.Any()) return "No hay estudiantes para mostrar.";
+
+            var sb = new StringBuilder();
+            int idWidth = 12;
+            int nameWidth = 25;
+            int carreraWidth = 20;
+            int matriculaWidth = 15;
+            string separator = new string('-', idWidth + nameWidth + carreraWidth + matriculaWidth + 10);
+
+            sb.AppendLine(separator);
+            sb.AppendLine($"| {"ID".PadRight(idWidth)} | {"Nombre Completo".PadRight(nameWidth)} | {"Carrera".PadRight(carreraWidth)} | {"Matrícula".PadRight(matriculaWidth)} |");
+            sb.AppendLine(separator);
+
+            foreach (var est in estudiantes)
+            {
+                string nombreCompleto = $"{est.Nombre} {est.Apellido}";
+                sb.AppendLine($"| {est.Identificacion.PadRight(idWidth)} | {nombreCompleto.PadRight(nameWidth)} | {est.Carrera.PadRight(carreraWidth)} | {est.NumeroMatricula.PadRight(matriculaWidth)} |");
+            }
+            sb.AppendLine(separator);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// NUEVO MÉTODO DE BONUS: Genera una tabla de texto para Profesores.
+        /// </summary>
+        public static string GenerarReporteProfesores(IEnumerable<Profesor> profesores)
+        {
+            if (!profesores.Any()) return "No hay profesores para mostrar.";
+
+            var sb = new StringBuilder();
+            int idWidth = 12;
+            int nameWidth = 25;
+            int deptoWidth = 20;
+            int salarioWidth = 15;
+            string separator = new string('-', idWidth + nameWidth + deptoWidth + salarioWidth + 10);
+
+            sb.AppendLine(separator);
+            sb.AppendLine($"| {"ID".PadRight(idWidth)} | {"Nombre Completo".PadRight(nameWidth)} | {"Departamento".PadRight(deptoWidth)} | {"Salario".PadRight(salarioWidth)} |");
+            sb.AppendLine(separator);
+
+            foreach (var prof in profesores)
+            {
+                string nombreCompleto = $"{prof.Nombre} {prof.Apellido}";
+                // Usamos "C0" para formato de Moneda sin decimales (ej: $50,000)
+                sb.AppendLine($"| {prof.Identificacion.PadRight(idWidth)} | {nombreCompleto.PadRight(nameWidth)} | {prof.Departamento.PadRight(deptoWidth)} | {prof.Salario.ToString("C0", CultureInfo.CurrentUICulture).PadRight(salarioWidth)} |");
+            }
+            sb.AppendLine(separator);
+            return sb.ToString();
+        }
+
+        public static string GenerarReporteCursos(IEnumerable<Curso> cursos)
+        {
+            if (!cursos.Any()) return "No hay cursos para mostrar.";
+
+            var sb = new StringBuilder();
+            int colCod = 10;
+            int colNom = 25;
+            int colCred = 10;
+            int colProf = 20;
+            string separator = new string('-', colCod + colNom + colCred + colProf + 10);
+
+            sb.AppendLine(separator);
+            sb.AppendLine($"| {"Código".PadRight(colCod)} | {"Nombre".PadRight(colNom)} | {"Créditos".PadRight(colCred)} | {"Profesor".PadRight(colProf)} |");
+            sb.AppendLine(separator);
+
+            foreach (var curso in cursos)
+            {
+                string prof = curso.ProfesorAsignado?.Nombre ?? "N/A";
+                sb.AppendLine($"| {curso.Codigo.PadRight(colCod)} | {curso.Nombre.PadRight(colNom)} | {curso.Creditos.ToString().PadRight(colCred)} | {prof.PadRight(colProf)} |");
+            }
+            sb.AppendLine(separator);
+            return sb.ToString();
+        }
+    }
+
+    #endregion
 
     // =====================================================================
     // =====================================================================
@@ -54,14 +478,14 @@ namespace AppdeGestionCompleta
                 switch (opcion)
                 {
                     case 1: MostrarMenuGestion("Estudiantes"); break;
-                    case 2: MostrarMenuGestion("Profesores"); break;
+                    case 2: MostrarMenuGestion("Profesores"); break; // <-- AHORA FUNCIONA
                     case 3: MostrarMenuGestion("Cursos"); break;
                     case 4: MatricularEstudiante(); break;
                     case 5: RegistrarCalificaciones(); break;
                     case 6: MostrarMenuReportes(); break;
                     case 7: MostrarMenuReflection(); break;
                     case 8:
-                        Ejercicio9y10yBonusRestantes.GuardarDatos(); // <-- BONUS
+                        Program.GuardarDatos(); // <-- BONUS
                         continuar = false;
                         break;
                     case 9: continuar = false; break; // Salir sin guardar
@@ -217,11 +641,11 @@ namespace AppdeGestionCompleta
 
         // --- MANEJO DE ESTUDIANTES ---
         private static void ManejarOpcionEstudiante(int opcion, ref bool volver)
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             switch (opcion)
             {
                 case 1: AgregarEstudiante(); break;
-                case 2: ListarEstudiantes(); break; // <-- MODIFICADO
+                case 2: ListarEstudiantes(); break;
                 case 3: BuscarEstudiante(); break;
                 case 4: MostrarError("Función 'Modificar Estudiante' no implementada."); break;
                 case 5: EliminarEstudiante(); break;
@@ -261,7 +685,7 @@ namespace AppdeGestionCompleta
             // --- Fin del Bonus ---
         }
         private static void BuscarEstudiante()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Buscar Estudiante por ID");
             string id = LeerTextoRequerido("Ingrese el ID del estudiante: ");
             var est = _repoEstudiantes.BuscarPorId(id);
@@ -269,7 +693,7 @@ namespace AppdeGestionCompleta
             else { MostrarExito("Estudiante Encontrado:"); Console.WriteLine(est.ToString()); }
         }
         private static void EliminarEstudiante()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Eliminar Estudiante");
             string id = LeerTextoRequerido("Ingrese el ID del estudiante a eliminar: ");
             if (_repoEstudiantes.Eliminar(id)) MostrarExito("Estudiante eliminado con éxito.");
@@ -277,20 +701,90 @@ namespace AppdeGestionCompleta
         }
 
         // --- MANEJO DE PROFESORES ---
+        // *** ¡FUNCIONALIDAD AÑADIDA! ***
         private static void ManejarOpcionProfesor(int opcion, ref bool volver)
-        { /* ... (código idéntico al de la respuesta anterior) ... */
-            MostrarError("Funcionalidad de Profesores no implementada en este ejemplo.");
-            Pausar();
-            volver = true;
+        {
+            switch (opcion)
+            {
+                case 1: AgregarProfesor(); break;
+                case 2: ListarProfesores(); break;
+                case 3: BuscarProfesor(); break;
+                case 4: MostrarError("Función 'Modificar Profesor' no implementada."); break;
+                case 5: EliminarProfesor(); break;
+                case 6: volver = true; break;
+            }
+        }
+        private static void AgregarProfesor()
+        {
+            try
+            {
+                MostrarTitulo("Agregar Nuevo Profesor");
+                string id = LeerTextoRequerido("Identificación (ID) (Ej: P-101): ");
+                string nombre = LeerTextoRequerido("Nombre: ");
+                string apellido = LeerTextoRequerido("Apellido: ");
+                string depto = LeerTextoRequerido("Departamento: ");
+                DateTime fechaNac = LeerFecha("Fecha de Nacimiento (yyyy-MM-dd): ");
+
+                Profesor prof = new Profesor(id, nombre, apellido, fechaNac, depto);
+
+                // Pedir el salario (que tiene validación de rango)
+                decimal salario = LeerDecimal("Salario Base (30000-150000): ", 30000, 150000);
+                prof.Salario = salario; // Asignar el salario
+
+                _repoProfesores.Agregar(prof);
+                MostrarExito("¡Profesor agregado con éxito!");
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex.Message);
+                Logger.Log($"Error al agregar profesor: {ex.Message}", "ERROR");
+            }
+        }
+        private static void ListarProfesores()
+        {
+            MostrarTitulo("Listado de Profesores");
+            var todos = _repoProfesores.ObtenerTodos();
+
+            // --- BONUS: Llamada al Generador de Reportes ---
+            string reporte = GeneradorReportes.GenerarReporteProfesores(todos);
+            Console.WriteLine(reporte);
+        }
+        private static void BuscarProfesor()
+        {
+            MostrarTitulo("Buscar Profesor por ID");
+            string id = LeerTextoRequerido("Ingrese el ID del profesor: ");
+            var prof = _repoProfesores.BuscarPorId(id);
+            if (prof == null)
+            {
+                MostrarError("Profesor no encontrado.");
+            }
+            else
+            {
+                MostrarExito("Profesor Encontrado:");
+                Console.WriteLine($"{prof} | Depto: {prof.Departamento} | Salario: {prof.Salario:C0}");
+            }
+        }
+        private static void EliminarProfesor()
+        {
+            MostrarTitulo("Eliminar Profesor");
+            string id = LeerTextoRequerido("Ingrese el ID del profesor a eliminar: ");
+            if (_repoProfesores.Eliminar(id))
+            {
+                MostrarExito("Profesor eliminado con éxito.");
+            }
+            else
+            {
+                MostrarError("No se encontró un profesor con ese ID.");
+            }
         }
 
         // --- MANEJO DE CURSOS ---
         private static void ManejarOpcionCurso(int opcion, ref bool volver)
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             switch (opcion)
             {
                 case 1: AgregarCurso(); break;
-                case 2: ListarCursos(); break; // <-- MODIFICADO
+                case 2: ListarCursos(); break;
                 case 3: BuscarCurso(); break;
                 case 4: AsignarProfesorACurso(); break;
                 case 5: EliminarCurso(); break;
@@ -298,7 +792,7 @@ namespace AppdeGestionCompleta
             }
         }
         private static void AgregarCurso()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             try
             {
                 MostrarTitulo("Agregar Nuevo Curso");
@@ -323,10 +817,9 @@ namespace AppdeGestionCompleta
             // --- BONUS: Llamada al Generador de Reportes ---
             string reporte = GeneradorReportes.GenerarReporteCursos(todos);
             Console.WriteLine(reporte);
-            // --- Fin del Bonus ---
         }
         private static void BuscarCurso()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Buscar Curso por Código");
             string codigo = LeerTextoRequerido("Ingrese el Código del curso: ");
             var curso = _repoCursos.BuscarPorId(codigo);
@@ -339,7 +832,7 @@ namespace AppdeGestionCompleta
             }
         }
         private static void AsignarProfesorACurso()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Asignar Profesor a Curso");
             string codigoCurso = LeerTextoRequerido("Código del Curso: ");
             var curso = _repoCursos.BuscarPorId(codigoCurso);
@@ -352,7 +845,7 @@ namespace AppdeGestionCompleta
             Logger.Log($"Profesor {prof.Identificacion} asignado a curso {curso.Codigo}.");
         }
         private static void EliminarCurso()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Eliminar Curso");
             string codigo = LeerTextoRequerido("Ingrese el Código del curso a eliminar: ");
             if (_repoCursos.Eliminar(codigo)) MostrarExito("Curso eliminado con éxito.");
@@ -361,7 +854,7 @@ namespace AppdeGestionCompleta
 
         // --- MANEJO DE MATRÍCULA Y CALIFICACIONES ---
         private static void MatricularEstudiante()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Matricular Estudiante en Curso");
             try
             {
@@ -377,7 +870,7 @@ namespace AppdeGestionCompleta
             }
         }
         private static void RegistrarCalificaciones()
-        { /* ... (código idéntico al de la respuesta anterior) ... */
+        {
             MostrarTitulo("Registrar Calificación");
             try
             {
@@ -397,7 +890,6 @@ namespace AppdeGestionCompleta
         #endregion
 
         #region Lógica de Reportes (LINQ - Ej. 9)
-        // (Esta sección no necesita cambios, solo se copian los métodos)
 
         private static void ReporteTop10()
         {
@@ -576,7 +1068,6 @@ namespace AppdeGestionCompleta
 
     public static class DemoAutomatizada
     {
-        // CORREGIDO: Quitada la palabra 'readonly'
         private static Repositorio<Estudiante> _repoEstudiantes;
         private static Repositorio<Profesor> _repoProfesores;
         private static Repositorio<Curso> _repoCursos;
@@ -585,7 +1076,11 @@ namespace AppdeGestionCompleta
         private static AnalizadorReflection _analizador;
         private static Random _rand;
 
-        public static void Ejecutar(
+        /// <summary>
+        /// (CORREGIDO) Asigna las instancias estáticas de Program 
+        /// a los campos estáticos de esta clase.
+        /// </summary>
+        public static void Inicializar(
             Repositorio<Estudiante> repoE,
             Repositorio<Profesor> repoP,
             Repositorio<Curso> repoC,
@@ -601,8 +1096,13 @@ namespace AppdeGestionCompleta
             _validador = validador;
             _analizador = analizador;
             _rand = rand;
+        }
 
-            // 1. Poblar el sistema (solo si está vacío)
+        /// <summary>
+        /// (CORREGIDO) Ejecuta la demo completa (Genera datos si es necesario Y muestra funcionalidades)
+        /// </summary>
+        public static void Ejecutar()
+        {
             if (!_repoEstudiantes.ObtenerTodos().Any())
             {
                 GenerarDatosPrueba();
@@ -613,12 +1113,12 @@ namespace AppdeGestionCompleta
                 Pausar();
             }
 
-            // 2. Ejecutar la demostración
             DemostrarFuncionalidades();
         }
 
         #region Generador de Datos (Ej. 10)
 
+        // CORREGIDO: Hecho público para que Program.Main pueda llamarlo
         public static void GenerarDatosPrueba()
         {
             Titulo("Generando Datos de Prueba...", ConsoleColor.Yellow);
@@ -629,6 +1129,8 @@ namespace AppdeGestionCompleta
                 var p3 = new Profesor("P-103", "Juan", "Castro", new DateTime(1975, 3, 3), "Medicina");
                 var p4 = new Profesor("P-104", "Lucia", "Gomez", new DateTime(1988, 4, 4), "Arquitectura");
                 var p5 = new Profesor("P-105", "Pedro", "Martinez", new DateTime(1990, 5, 5), "Humanidades");
+
+                // Esta es la línea que fallaba. Ahora _repoProfesores no será null.
                 _repoProfesores.Agregar(p1); _repoProfesores.Agregar(p2); _repoProfesores.Agregar(p3); _repoProfesores.Agregar(p4); _repoProfesores.Agregar(p5);
                 Console.WriteLine(" > 5 Profesores agregados.");
 
@@ -835,6 +1337,7 @@ namespace AppdeGestionCompleta
 
         #region Helpers de UI (Formato de Consola)
 
+        // (Métodos privados estáticos para esta clase)
         private static void Titulo(string texto, ConsoleColor color)
         {
             Console.WriteLine();
@@ -885,10 +1388,9 @@ namespace AppdeGestionCompleta
     /// Esta es la clase principal que contiene el ÚNICO punto de entrada (Main).
     /// Actúa como un "enrutador" para iniciar el Ej. 9 o el Ej. 10.
     /// </summary>
-    public class Ejercicio9y10yBonusRestantes
+    public class Program
     {
         // --- Almacenes de datos "Backend" GLOBALES (estáticos) ---
-        // CORREGIDO: Todos los campos estáticos AHORA SÍ ESTÁN INICIALIZADOS.
         private static readonly Repositorio<Estudiante> _repoEstudiantes = new Repositorio<Estudiante>();
         private static readonly Repositorio<Profesor> _repoProfesores = new Repositorio<Profesor>();
         private static readonly Repositorio<Curso> _repoCursos = new Repositorio<Curso>();
@@ -917,6 +1419,12 @@ namespace AppdeGestionCompleta
             // --- BONUS: Cargar Datos ---
             CargarDatos(); // Cargar datos de JSON si existen
 
+            // *** CORRECCIÓN ***
+            // Inicializar las clases estáticas ANTES de usarlas
+            DemoAutomatizada.Inicializar(_repoEstudiantes, _repoProfesores, _repoCursos, _gestor, _validador, _analizador, _rand);
+            // (La inicialización de MenuInteractivo se hace dentro del 'if')
+
+
             Console.WriteLine("Bienvenido al Sistema de Gestión Académica.");
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("===========================================");
@@ -936,7 +1444,15 @@ namespace AppdeGestionCompleta
                 // --- Ejecutar Ejercicio 9 ---
                 Console.Clear();
                 Logger.Log("Iniciando Menú Interactivo (Ej. 9).");
-                // Llamamos al método principal del Ej. 9
+
+                // Generar datos SOLO SI es necesario (si CargarDatos no encontró nada)
+                if (!_repoEstudiantes.ObtenerTodos().Any())
+                {
+                    Console.WriteLine("No se encontraron datos. Generando datos de prueba...");
+                    DemoAutomatizada.GenerarDatosPrueba();
+                    PausarSimple();
+                }
+
                 MenuInteractivo.Ejecutar(_repoEstudiantes, _repoProfesores, _repoCursos, _gestor, _analizador);
             }
             else if (opcion == "2")
@@ -944,8 +1460,9 @@ namespace AppdeGestionCompleta
                 // --- Ejecutar Ejercicio 10 ---
                 Console.Clear();
                 Logger.Log("Iniciando Demo Automatizada (Ej. 10).");
-                // Llamamos al método principal del Ej. 10
-                DemoAutomatizada.Ejecutar(_repoEstudiantes, _repoProfesores, _repoCursos, _gestor, _validador, _analizador, _rand);
+
+                // Llamar a Ejecutar() que ahora SÍ inicializa los campos primero
+                DemoAutomatizada.Ejecutar();
             }
             else
             {
@@ -971,19 +1488,15 @@ namespace AppdeGestionCompleta
             Console.WriteLine("=============================================");
             Console.ResetColor();
 
-            // Usuarios hardcodeados (user/pass)
             var usuarios = new Dictionary<string, string>
-            {
-                { "admin", "1234" },
-                { "user", "pass" }
-            };
+            { { "admin", "1234" }, { "user", "pass" } };
 
-            for (int i = 0; i < 3; i++) // 3 intentos
+            for (int i = 0; i < 3; i++)
             {
                 Console.Write("Usuario: ");
                 string user = Console.ReadLine();
                 Console.Write("Contraseña: ");
-                string pass = Console.ReadLine(); // (En una app real, esto se enmascararía)
+                string pass = Console.ReadLine();
 
                 if (usuarios.ContainsKey(user) && usuarios[user] == pass)
                 {
@@ -991,7 +1504,7 @@ namespace AppdeGestionCompleta
                     Console.WriteLine("\n¡Acceso concedido! Bienvenido.");
                     Console.ResetColor();
                     Logger.Log($"Inicio de sesión exitoso para el usuario: {user}");
-                    Thread.Sleep(1000); // Pequeña pausa
+                    Thread.Sleep(1000);
                     return true;
                 }
 
@@ -1017,16 +1530,12 @@ namespace AppdeGestionCompleta
                 var options = new JsonSerializerOptions
                 {
                     WriteIndented = true,
-                    // Maneja referencias circulares (ej: Profesor en Curso y Curso en Profesor)
                     ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve
                 };
 
                 File.WriteAllText("profesores.json", JsonSerializer.Serialize(_repoProfesores.ObtenerTodos(), options));
                 File.WriteAllText("estudiantes.json", JsonSerializer.Serialize(_repoEstudiantes.ObtenerTodos(), options));
                 File.WriteAllText("cursos.json", JsonSerializer.Serialize(_repoCursos.ObtenerTodos(), options));
-
-                // Nota: Las matrículas (la lógica del gestor) no se guardan,
-                // solo las entidades maestras.
 
                 Logger.Log("Datos guardados en JSON.");
             }
@@ -1048,7 +1557,6 @@ namespace AppdeGestionCompleta
                     ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve
                 };
 
-                // Es importante cargar Profesores primero
                 if (File.Exists("profesores.json"))
                 {
                     var data = JsonSerializer.Deserialize<List<Profesor>>(File.ReadAllText("profesores.json"), options);
@@ -1071,6 +1579,17 @@ namespace AppdeGestionCompleta
             {
                 Logger.Log($"Error al cargar JSON: {ex.Message}", "ERROR");
             }
+        }
+
+        /// <summary>
+        /// Helper de pausa simple para el lanzador.
+        /// </summary>
+        private static void PausarSimple()
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("\n(Presione Enter para continuar...)");
+            Console.ResetColor();
+            Console.ReadLine();
         }
     }
     #endregion
