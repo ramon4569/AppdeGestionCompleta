@@ -1,405 +1,20 @@
-﻿/*
- * =====================================================================
- * APLICACIÓN FINAL - TODOS LOS EJERCICIOS (1-10) UNIFICADOS
- * =====================================================================
- * Este es un solo archivo que contiene todo el sistema,
- * organizado por número de ejercicio usando regiones.
- *
- * CORRECCIONES APLICADAS:
- * 1. Inicializados los repositorios estáticos en Program (Arregla NullReferenceException).
- * 2. Quitada la palabra 'readonly' de los campos en MenuInteractivo y 
- * DemoAutomatizada (Arregla CS0198).
- * 3. Corregido typo 'listaGeneralMatcalificaciones' en GestorMatriculas (Arregla CS0103).
- * 4. Corregida llamada a 'Subtitulo' en AnalizadorReflection (Arregla CS0103).
- * =====================================================================
- */
-
+﻿
 using System;
 using System.Collections.Generic;
 using System.Globalization; // Para formatos
+using System.IO; // BONUS: Para Archivos (Logs y JSON)
 using System.Linq; // Para LINQ
 using System.Reflection; // Para Reflection
 using System.Text; // Para StringBuilder
+using System.Text.Json; // BONUS: Para Serialización
 using System.Text.RegularExpressions; // Para Atributo [Formato]
+using System.Threading; // BONUS: Para Pausas 
 
 // El namespace principal que envuelve toda la aplicación
-namespace SistemaGestionAcademica_FINAL
+namespace AppdeGestionCompleta
 {
-    // =====================================================================
-    // =====================================================================
-    #region EJERCICIOS 1-8: LÓGICA DE NEGOCIO (BACKEND)
-    // =====================================================================
-    // =====================================================================
-
-    #region Ejercicio 1: Jerarquía de Clases (Persona, Estudiante, Profesor)
-
-    /// <summary>
-    /// Clase base abstracta. Implementa IIdentificable (Ej. 3).
-    /// </summary>
-    public abstract class Persona : IIdentificable
-    {
-        [Requerido] // (Ej. 8)
-        public string Identificacion { get; set; }
-
-        [Requerido] // (Ej. 8)
-        public string Nombre { get; set; }
-
-        [Requerido] // (Ej. 8)
-        public string Apellido { get; set; }
-
-        public DateTime FechaNacimiento { get; set; }
-
-        public int Edad { get { return DateTime.Today.Year - FechaNacimiento.Year; } }
-
-        public Persona(string id, string nom, string ape, DateTime fechaNac)
-        { Identificacion = id; Nombre = nom; Apellido = ape; FechaNacimiento = fechaNac; }
-
-        public abstract string ObtenerRol();
-
-        public override string ToString() => $"[{Identificacion}] {Nombre} {Apellido} (Rol: {ObtenerRol()})";
-    }
-
-    /// <summary>
-    /// Clase hija de Persona.
-    /// </summary>
-    public class Profesor : Persona
-    {
-        public string Departamento { get; set; }
-
-        [ValidacionRango(30000, 150000)] // (Ej. 8)
-        public decimal Salario { get; set; }
-
-        public Profesor(string id, string nom, string ape, DateTime fechaNac, string depto)
-            : base(id, nom, ape, fechaNac)
-        {
-            if (Edad < 25) throw new ArgumentException("Profesor debe tener al menos 25 años.");
-            Departamento = depto;
-        }
-
-        public override string ObtenerRol() => "Profesor";
-    }
-
-    /// <summary>
-    /// Clase hija de Persona.
-    /// </summary>
-    public class Estudiante : Persona
-    {
-        [Requerido] // (Ej. 8)
-        public string Carrera { get; set; }
-
-        [Formato(@"^\d{4}-\d{4}$")] // (Ej. 8)
-        public string NumeroMatricula { get; set; }
-
-        public Estudiante(string id, string nom, string ape, DateTime fechaNac, string carrera, string matricula)
-            : base(id, nom, ape, fechaNac)
-        {
-            if (Edad < 15) throw new ArgumentException("Estudiante debe tener al menos 15 años.");
-            Carrera = carrera; NumeroMatricula = matricula;
-        }
-
-        public override string ObtenerRol() => "Estudiante";
-    }
-    #endregion
-
-    #region Ejercicio 2: Interfaces y Clases de Cursos (IEvaluable, Curso, Matricula)
-
-    /// <summary>
-    /// Interfaz que define un contrato para objetos evaluables.
-    /// </summary>
-    public interface IEvaluable
-    {
-        void AgregarCalificacion(decimal calificacion);
-        decimal ObtenerPromedio();
-        bool HaAprobado();
-    }
-
-    /// <summary>
-    /// Clase de datos del curso. Implementa IIdentificable (Ej. 3).
-    /// </summary>
-    public class Curso : IIdentificable
-    {
-        [Requerido]
-        [Formato(@"^[A-Z]{2,3}-\d{3}$")] // (Ej. 8)
-        public string Codigo { get; set; }
-
-        [Requerido] // (Ej. 8)
-        public string Nombre { get; set; }
-
-        [ValidacionRango(1, 6)] // (Ej. 8)
-        public int Creditos { get; set; }
-
-        public Profesor ProfesorAsignado { get; set; }
-
-        // Implementación de IIdentificable (Ej. 3)
-        public string Identificacion => Codigo;
-    }
-
-    /// <summary>
-    /// Clase que representa la relación Estudiante-Curso. Implementa IEvaluable.
-    /// </summary>
-    public class Matricula : IEvaluable
-    {
-        public Estudiante Estudiante { get; set; }
-        public Curso Curso { get; set; }
-        private List<decimal> Calificaciones = new List<decimal>();
-        private const decimal NotaMinimaAprobatoria = 7.0m;
-
-        public Matricula(Estudiante est, Curso cur) { Estudiante = est; Curso = cur; }
-
-        public void AgregarCalificacion(decimal calificacion)
-        {
-            if (calificacion < 0 || calificacion > 10) throw new ArgumentException("Calificación debe estar entre 0 y 10.");
-            Calificaciones.Add(calificacion);
-        }
-
-        public decimal ObtenerPromedio() => Calificaciones.Count == 0 ? 0 : Calificaciones.Average();
-
-        public bool HaAprobado() => ObtenerPromedio() >= NotaMinimaAprobatoria;
-
-        public string ObtenerEstado() => Calificaciones.Count == 0 ? "En Curso" : (HaAprobado() ? "Aprobado" : "Reprobado");
-    }
-    #endregion
-
-    #region Ejercicio 3: Repositorio Genérico (IIdentificable, Repositorio<T>)
-
-    /// <summary>
-    /// Interfaz que define un contrato para objetos con ID.
-    /// </summary>
-    public interface IIdentificable { string Identificacion { get; } }
-
-    /// <summary>
-    /// Clase de Repositorio Genérico para manejar CRUD en memoria.
-    /// </summary>
-    public class Repositorio<T> where T : IIdentificable
-    {
-        private Dictionary<string, T> _elementos = new Dictionary<string, T>();
-
-        public void Agregar(T item)
-        {
-            if (_elementos.ContainsKey(item.Identificacion)) throw new ArgumentException($"ID duplicado: {item.Identificacion}");
-            _elementos.Add(item.Identificacion, item);
-        }
-
-        public T BuscarPorId(string id)
-        {
-            _elementos.TryGetValue(id, out T item);
-            return item;
-        }
-
-        public bool Eliminar(string id) => _elementos.Remove(id);
-
-        public IEnumerable<T> ObtenerTodos() => _elementos.Values;
-
-        public IEnumerable<T> Buscar(Func<T, bool> predicado) => _elementos.Values.Where(predicado);
-    }
-    #endregion
-
-    #region Ejercicio 4 y 7: Gestor Central y LINQ (GestorMatriculas)
-
-    /// <summary>
-    /// Clase de lógica de negocio (Parte 1: Métodos base).
-    /// </summary>
-    public partial class GestorMatriculas
-    {
-        private List<Matricula> _listaGeneralMatriculas = new List<Matricula>();
-        private readonly Repositorio<Estudiante> _repoEstudiantes;
-        private readonly Repositorio<Profesor> _repoProfesores;
-        private readonly Repositorio<Curso> _repoCursos;
-
-        public GestorMatriculas(Repositorio<Estudiante> rE, Repositorio<Profesor> rP, Repositorio<Curso> rC)
-        {
-            _repoEstudiantes = rE; _repoProfesores = rP; _repoCursos = rC;
-        }
-
-        public void MatricularEstudiante(Estudiante est, Curso curso)
-        {
-            // CORREGIDO: El nombre de la variable es '_listaGeneralMatriculas'
-            bool yaExiste = _listaGeneralMatriculas.Any(m => m.Estudiante.Identificacion == est.Identificacion && m.Curso.Codigo == curso.Codigo);
-            if (yaExiste) throw new InvalidOperationException("Estudiante ya matriculado.");
-            _listaGeneralMatriculas.Add(new Matricula(est, curso));
-        }
-
-        public void MatricularEstudiante(string idEstudiante, string codigoCurso)
-        {
-            var est = _repoEstudiantes.BuscarPorId(idEstudiante);
-            if (est == null) throw new KeyNotFoundException("Estudiante no encontrado.");
-            var curso = _repoCursos.BuscarPorId(codigoCurso);
-            if (curso == null) throw new KeyNotFoundException("Curso no encontrado.");
-            MatricularEstudiante(est, curso);
-        }
-
-        public void AgregarCalificacion(string idEstudiante, string codigoCurso, decimal calificacion)
-        {
-            var matricula = _listaGeneralMatriculas.FirstOrDefault(m => m.Estudiante.Identificacion == idEstudiante && m.Curso.Codigo == codigoCurso);
-            if (matricula == null) throw new KeyNotFoundException("Matrícula no encontrada.");
-            matricula.AgregarCalificacion(calificacion);
-        }
-
-        public string GenerarReporteEstudiante(string idEstudiante)
-        {
-            var matriculas = _listaGeneralMatriculas.Where(m => m.Estudiante.Identificacion == idEstudiante);
-            if (!matriculas.Any()) throw new KeyNotFoundException("Estudiante no encontrado o sin matrículas.");
-
-            var est = matriculas.First().Estudiante;
-            var reporte = new StringBuilder();
-            reporte.AppendLine($"--- REPORTE ACADÉMICO: {est.Nombre} {est.Apellido} ---");
-            foreach (var m in matriculas)
-            {
-                reporte.AppendLine($"  > Curso: {m.Curso.Nombre} | Promedio: {m.ObtenerPromedio():F2} | Estado: {m.ObtenerEstado()}");
-            }
-            return reporte.ToString();
-        }
-    }
-
-    /// <summary>
-    /// Clase de lógica de negocio (Parte 2: Métodos LINQ - Ej. 7).
-    /// </summary>
-    public partial class GestorMatriculas
-    {
-        public IEnumerable<dynamic> ObtenerTop10Estudiantes()
-        {
-            return _listaGeneralMatriculas.GroupBy(m => m.Estudiante)
-                .Select(g => new { Estudiante = g.Key, PromedioGeneral = g.Average(m => m.ObtenerPromedio()) })
-                .OrderByDescending(x => x.PromedioGeneral).Take(10);
-        }
-
-        public IEnumerable<Estudiante> ObtenerEstudiantesEnRiesgo()
-        {
-            return _listaGeneralMatriculas.GroupBy(m => m.Estudiante)
-                .Where(g => g.Average(m => m.ObtenerPromedio()) < 7.0m)
-                .Select(g => g.Key);
-        }
-
-        public IEnumerable<dynamic> ObtenerCursosMasPopulares()
-        {
-            return _listaGeneralMatriculas.GroupBy(m => m.Curso.Nombre)
-                .Select(g => new { Curso = g.Key, CantidadEstudiantes = g.Count() })
-                .OrderByDescending(x => x.CantidadEstudiantes);
-        }
-
-        public decimal ObtenerPromedioGeneral()
-        {
-            var promedios = _listaGeneralMatriculas.GroupBy(m => m.Estudiante)
-                               .Select(g => g.Average(m => m.ObtenerPromedio()));
-            return promedios.Any() ? promedios.Average() : 0;
-        }
-
-        public string ObtenerEstadisticasPorCarrera()
-        {
-            var reporte = new StringBuilder();
-            reporte.AppendLine("--- Estadísticas por Carrera ---");
-            var grupos = _listaGeneralMatriculas.GroupBy(m => m.Estudiante.Carrera);
-            foreach (var g in grupos)
-            {
-                var estUnicos = g.Select(m => m.Estudiante).Distinct().Count();
-                var promCarrera = g.GroupBy(m => m.Estudiante).Select(gEst => gEst.Average(m => m.ObtenerPromedio())).Average();
-                reporte.AppendLine($"   > {g.Key}: {estUnicos} Estudiantes | Promedio General: {promCarrera:F2}");
-            }
-            return reporte.ToString();
-        }
-
-        public IEnumerable<Estudiante> BuscarEstudiantes(Func<Estudiante, bool> criterio)
-        {
-            return _repoEstudiantes.Buscar(criterio);
-        }
-    }
-    #endregion
-
-    #region Ejercicio 6: Reflection (AnalizadorReflection)
-
-    /// <summary>
-    /// Clase que usa Reflection para analizar metadatos.
-    /// </summary>
-    public class AnalizadorReflection
-    {
-        public void MostrarPropiedades(Type tipo)
-        {
-            // CORREGIDO: Se usa Console.WriteLine
-            Console.WriteLine($"\n--- Propiedades Públicas de [{tipo.Name}] ---");
-            PropertyInfo[] propiedades = tipo.GetProperties();
-            foreach (var prop in propiedades) { Console.WriteLine($"   > {prop.Name} (Tipo: {prop.PropertyType.Name})"); }
-        }
-
-        public void MostrarMetodos(Type tipo)
-        {
-            // CORREGIDO: Se usa Console.WriteLine
-            Console.WriteLine($"\n--- Métodos Públicos de [{tipo.Name}] ---");
-            MethodInfo[] metodos = tipo.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-            if (metodos.Length == 0) { Console.WriteLine("   > (No se encontraron métodos públicos declarados)"); return; }
-            foreach (var met in metodos) { Console.WriteLine($"   > {met.Name}()"); }
-        }
-    }
-    #endregion
-
-    #region Ejercicio 8: Atributos Personalizados y Validador
-
-    // --- 1. Definición de Atributos ---
-
-    [AttributeUsage(AttributeTargets.Property)]
-    public class RequeridoAttribute : Attribute { }
-
-    [AttributeUsage(AttributeTargets.Property)]
-    public class ValidacionRangoAttribute : Attribute
-    {
-        public double Min { get; }
-        public double Max { get; }
-        public ValidacionRangoAttribute(double min, double max) { Min = min; Max = max; }
-    }
-
-    [AttributeUsage(AttributeTargets.Property)]
-    public class FormatoAttribute : Attribute
-    {
-        public string Pattern { get; }
-        public FormatoAttribute(string pattern) { Pattern = pattern; }
-    }
-
-    // --- 2. Clase Validadora ---
-
-    /// <summary>
-    /// Clase que usa Reflection (Ej. 6) para leer Atributos (Ej. 8).
-    /// </summary>
-    public class Validador
-    {
-        public List<string> Validar(object instancia)
-        {
-            var errores = new List<string>();
-            Type tipo = instancia.GetType();
-            foreach (var prop in tipo.GetProperties())
-            {
-                object valor = prop.GetValue(instancia);
-                foreach (var attr in prop.GetCustomAttributes(true))
-                {
-                    if (attr is RequeridoAttribute)
-                    {
-                        if (valor == null || (valor is string s && string.IsNullOrWhiteSpace(s)))
-                            errores.Add($"[Requerido] '{prop.Name}' no puede ser nulo o vacío.");
-                    }
-                    else if (attr is ValidacionRangoAttribute rango)
-                    {
-                        if (valor != null)
-                        {
-                            try
-                            {
-                                double valNum = Convert.ToDouble(valor);
-                                if (valNum < rango.Min || valNum > rango.Max)
-                                    errores.Add($"[Rango] '{prop.Name}' ({valNum}) fuera de rango ({rango.Min}-{rango.Max}).");
-                            }
-                            catch (Exception) { /* Ignorar si no es numérico */ }
-                        }
-                    }
-                    else if (attr is FormatoAttribute formato)
-                    {
-                        if (valor is string s && !string.IsNullOrEmpty(s) && !Regex.IsMatch(s, formato.Pattern))
-                            errores.Add($"[Formato] '{prop.Name}' ('{s}') no cumple el formato '{formato.Pattern}'.");
-                    }
-                }
-            }
-            return errores;
-        }
-    }
-    #endregion
-
-    #endregion
+   
+   
 
     // =====================================================================
     // =====================================================================
@@ -407,22 +22,14 @@ namespace SistemaGestionAcademica_FINAL
     // =====================================================================
     // =====================================================================
 
-    /// <summary>
-    /// Implementación del menú interactivo del Ejercicio 9.
-    /// Se ejecuta si el usuario elije "1" en el Main.
-    /// </summary>
     public static class MenuInteractivo
     {
-        // CORREGIDO: Quitada la palabra 'readonly' para permitir asignación
         private static Repositorio<Estudiante> _repoEstudiantes;
         private static Repositorio<Profesor> _repoProfesores;
         private static Repositorio<Curso> _repoCursos;
         private static GestorMatriculas _gestor;
         private static AnalizadorReflection _analizador;
 
-        /// <summary>
-        /// Punto de entrada para el menú interactivo.
-        /// </summary>
         public static void Ejecutar(
             Repositorio<Estudiante> repoE,
             Repositorio<Profesor> repoP,
@@ -430,7 +37,6 @@ namespace SistemaGestionAcademica_FINAL
             GestorMatriculas gestor,
             AnalizadorReflection analizador)
         {
-            // Asigna las instancias compartidas a campos estáticos locales
             _repoEstudiantes = repoE;
             _repoProfesores = repoP;
             _repoCursos = repoC;
@@ -441,7 +47,8 @@ namespace SistemaGestionAcademica_FINAL
             while (continuar)
             {
                 MostrarMenuPrincipal();
-                int opcion = LeerOpcion(1, 8);
+                // BONUS: Se agregó la opción 9
+                int opcion = LeerOpcion(1, 9);
 
                 Console.Clear();
                 switch (opcion)
@@ -453,7 +60,11 @@ namespace SistemaGestionAcademica_FINAL
                     case 5: RegistrarCalificaciones(); break;
                     case 6: MostrarMenuReportes(); break;
                     case 7: MostrarMenuReflection(); break;
-                    case 8: continuar = false; break; // Salir del bucle
+                    case 8:
+                        Ejercicio9y10yBonusRestantes.GuardarDatos(); // <-- BONUS
+                        continuar = false;
+                        break;
+                    case 9: continuar = false; break; // Salir sin guardar
                 }
             }
             MostrarMensaje("Saliendo del Menú Interactivo...", ConsoleColor.Cyan);
@@ -476,7 +87,8 @@ namespace SistemaGestionAcademica_FINAL
             Console.WriteLine(" 5. Registrar Calificaciones");
             Console.WriteLine(" 6. Ver Reportes");
             Console.WriteLine(" 7. Análisis con Reflection");
-            Console.WriteLine(" 8. Salir");
+            Console.WriteLine(" 8. Guardar y Salir"); // <-- BONUS
+            Console.WriteLine(" 9. Salir (Sin Guardar)"); // <-- BONUS
             Console.WriteLine("---------------------------------------------");
         }
 
@@ -506,20 +118,15 @@ namespace SistemaGestionAcademica_FINAL
                 {
                     switch (entidad)
                     {
-                        case "Estudiantes":
-                            ManejarOpcionEstudiante(opcion, ref volver);
-                            break;
-                        case "Profesores":
-                            ManejarOpcionProfesor(opcion, ref volver);
-                            break;
-                        case "Cursos":
-                            ManejarOpcionCurso(opcion, ref volver);
-                            break;
+                        case "Estudiantes": ManejarOpcionEstudiante(opcion, ref volver); break;
+                        case "Profesores": ManejarOpcionProfesor(opcion, ref volver); break;
+                        case "Cursos": ManejarOpcionCurso(opcion, ref volver); break;
                     }
                 }
                 catch (Exception ex)
                 {
                     MostrarError($"Error Inesperado: {ex.Message}");
+                    Logger.Log($"Error en MenuGestion: {ex.Message}", "ERROR"); // <-- BONUS LOG
                 }
                 if (!volver) Pausar();
             }
@@ -561,6 +168,7 @@ namespace SistemaGestionAcademica_FINAL
                 catch (Exception ex)
                 {
                     MostrarError($"Error al generar reporte: {ex.Message}");
+                    Logger.Log($"Error en Reportes: {ex.Message}", "ERROR"); // <-- BONUS LOG
                 }
                 if (!volver) Pausar();
             }
@@ -609,18 +217,17 @@ namespace SistemaGestionAcademica_FINAL
 
         // --- MANEJO DE ESTUDIANTES ---
         private static void ManejarOpcionEstudiante(int opcion, ref bool volver)
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             switch (opcion)
             {
                 case 1: AgregarEstudiante(); break;
-                case 2: ListarEstudiantes(); break;
+                case 2: ListarEstudiantes(); break; // <-- MODIFICADO
                 case 3: BuscarEstudiante(); break;
                 case 4: MostrarError("Función 'Modificar Estudiante' no implementada."); break;
                 case 5: EliminarEstudiante(); break;
                 case 6: volver = true; break;
             }
         }
-
         private static void AgregarEstudiante()
         {
             try
@@ -630,7 +237,7 @@ namespace SistemaGestionAcademica_FINAL
                 string nombre = LeerTextoRequerido("Nombre: ");
                 string apellido = LeerTextoRequerido("Apellido: ");
                 string carrera = LeerTextoRequerido("Carrera: ");
-                string matricula = LeerTextoRequerido("Matrícula (Ej: 2024-0101): ");
+                string matricula = LeerTextoRequerido("Matrícula (Ej: 2024-0001): ");
                 DateTime fechaNac = LeerFecha("Fecha de Nacimiento (yyyy-MM-dd): ");
 
                 Estudiante est = new Estudiante(id, nombre, apellido, fechaNac, carrera, matricula);
@@ -639,87 +246,65 @@ namespace SistemaGestionAcademica_FINAL
             }
             catch (Exception ex)
             {
-                MostrarError(ex.Message); // Captura errores de validación (edad) o ID duplicado
+                MostrarError(ex.Message);
+                Logger.Log($"Error al agregar estudiante: {ex.Message}", "ERROR");
             }
         }
-
         private static void ListarEstudiantes()
         {
             MostrarTitulo("Listado de Estudiantes");
             var todos = _repoEstudiantes.ObtenerTodos();
-            if (!todos.Any())
-            {
-                MostrarMensaje("No hay estudiantes registrados.", ConsoleColor.Yellow);
-                return;
-            }
-            foreach (var est in todos)
-            {
-                Console.WriteLine(est.ToString());
-            }
-        }
 
+            // --- BONUS: Llamada al Generador de Reportes ---
+            string reporte = GeneradorReportes.GenerarReporteEstudiantes(todos);
+            Console.WriteLine(reporte);
+            // --- Fin del Bonus ---
+        }
         private static void BuscarEstudiante()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Buscar Estudiante por ID");
             string id = LeerTextoRequerido("Ingrese el ID del estudiante: ");
             var est = _repoEstudiantes.BuscarPorId(id);
-            if (est == null)
-            {
-                MostrarError("Estudiante no encontrado.");
-            }
-            else
-            {
-                MostrarExito("Estudiante Encontrado:");
-                Console.WriteLine(est.ToString());
-            }
+            if (est == null) MostrarError("Estudiante no encontrado.");
+            else { MostrarExito("Estudiante Encontrado:"); Console.WriteLine(est.ToString()); }
         }
-
         private static void EliminarEstudiante()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Eliminar Estudiante");
             string id = LeerTextoRequerido("Ingrese el ID del estudiante a eliminar: ");
-            if (_repoEstudiantes.Eliminar(id))
-            {
-                MostrarExito("Estudiante eliminado con éxito.");
-            }
-            else
-            {
-                MostrarError("No se encontró un estudiante con ese ID.");
-            }
+            if (_repoEstudiantes.Eliminar(id)) MostrarExito("Estudiante eliminado con éxito.");
+            else MostrarError("No se encontró un estudiante con ese ID.");
         }
 
         // --- MANEJO DE PROFESORES ---
         private static void ManejarOpcionProfesor(int opcion, ref bool volver)
-        {
-            // (Implementación omitida por brevedad, sería igual a Estudiantes)
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarError("Funcionalidad de Profesores no implementada en este ejemplo.");
             Pausar();
-            volver = true; // Volver para no quedar en bucle
+            volver = true;
         }
 
         // --- MANEJO DE CURSOS ---
         private static void ManejarOpcionCurso(int opcion, ref bool volver)
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             switch (opcion)
             {
                 case 1: AgregarCurso(); break;
-                case 2: ListarCursos(); break;
+                case 2: ListarCursos(); break; // <-- MODIFICADO
                 case 3: BuscarCurso(); break;
                 case 4: AsignarProfesorACurso(); break;
                 case 5: EliminarCurso(); break;
                 case 6: volver = true; break;
             }
         }
-
         private static void AgregarCurso()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             try
             {
                 MostrarTitulo("Agregar Nuevo Curso");
                 string codigo = LeerTextoRequerido("Código (Ej: CS-101): ");
                 string nombre = LeerTextoRequerido("Nombre del Curso: ");
                 int creditos = (int)LeerDecimal("Créditos: ", 1, 10);
-
                 Curso curso = new Curso { Codigo = codigo, Nombre = nombre, Creditos = creditos };
                 _repoCursos.Agregar(curso);
                 MostrarExito("¡Curso agregado con éxito!");
@@ -727,34 +312,25 @@ namespace SistemaGestionAcademica_FINAL
             catch (Exception ex)
             {
                 MostrarError(ex.Message);
+                Logger.Log($"Error al agregar curso: {ex.Message}", "ERROR");
             }
         }
-
         private static void ListarCursos()
         {
             MostrarTitulo("Listado de Cursos");
             var todos = _repoCursos.ObtenerTodos();
-            if (!todos.Any())
-            {
-                MostrarMensaje("No hay cursos registrados.", ConsoleColor.Yellow);
-                return;
-            }
-            foreach (var curso in todos)
-            {
-                string prof = curso.ProfesorAsignado != null ? curso.ProfesorAsignado.Nombre : "Sin Asignar";
-                Console.WriteLine($"[{curso.Codigo}] {curso.Nombre} ({curso.Creditos} créd.) - Prof: {prof}");
-            }
-        }
 
+            // --- BONUS: Llamada al Generador de Reportes ---
+            string reporte = GeneradorReportes.GenerarReporteCursos(todos);
+            Console.WriteLine(reporte);
+            // --- Fin del Bonus ---
+        }
         private static void BuscarCurso()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Buscar Curso por Código");
             string codigo = LeerTextoRequerido("Ingrese el Código del curso: ");
             var curso = _repoCursos.BuscarPorId(codigo);
-            if (curso == null)
-            {
-                MostrarError("Curso no encontrado.");
-            }
+            if (curso == null) MostrarError("Curso no encontrado.");
             else
             {
                 MostrarExito("Curso Encontrado:");
@@ -762,39 +338,30 @@ namespace SistemaGestionAcademica_FINAL
                 Console.WriteLine($"[{curso.Codigo}] {curso.Nombre} ({curso.Creditos} créd.) - Prof: {prof}");
             }
         }
-
         private static void AsignarProfesorACurso()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Asignar Profesor a Curso");
             string codigoCurso = LeerTextoRequerido("Código del Curso: ");
             var curso = _repoCursos.BuscarPorId(codigoCurso);
             if (curso == null) { MostrarError("Curso no encontrado."); return; }
-
             string idProfesor = LeerTextoRequerido("ID del Profesor: ");
             var prof = _repoProfesores.BuscarPorId(idProfesor);
             if (prof == null) { MostrarError("Profesor no encontrado."); return; }
-
             curso.ProfesorAsignado = prof;
             MostrarExito($"Profesor {prof.Nombre} asignado a {curso.Nombre}.");
+            Logger.Log($"Profesor {prof.Identificacion} asignado a curso {curso.Codigo}.");
         }
-
         private static void EliminarCurso()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Eliminar Curso");
             string codigo = LeerTextoRequerido("Ingrese el Código del curso a eliminar: ");
-            if (_repoCursos.Eliminar(codigo))
-            {
-                MostrarExito("Curso eliminado con éxito.");
-            }
-            else
-            {
-                MostrarError("No se encontró un curso con ese código.");
-            }
+            if (_repoCursos.Eliminar(codigo)) MostrarExito("Curso eliminado con éxito.");
+            else MostrarError("No se encontró un curso con ese código.");
         }
 
         // --- MANEJO DE MATRÍCULA Y CALIFICACIONES ---
         private static void MatricularEstudiante()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Matricular Estudiante en Curso");
             try
             {
@@ -806,11 +373,11 @@ namespace SistemaGestionAcademica_FINAL
             catch (Exception ex)
             {
                 MostrarError(ex.Message);
+                Logger.Log($"Error en Matricular: {ex.Message}", "ERROR");
             }
         }
-
         private static void RegistrarCalificaciones()
-        {
+        { /* ... (código idéntico al de la respuesta anterior) ... */
             MostrarTitulo("Registrar Calificación");
             try
             {
@@ -823,12 +390,14 @@ namespace SistemaGestionAcademica_FINAL
             catch (Exception ex)
             {
                 MostrarError(ex.Message);
+                Logger.Log($"Error en Calificar: {ex.Message}", "ERROR");
             }
         }
 
         #endregion
 
         #region Lógica de Reportes (LINQ - Ej. 9)
+        // (Esta sección no necesita cambios, solo se copian los métodos)
 
         private static void ReporteTop10()
         {
@@ -841,7 +410,6 @@ namespace SistemaGestionAcademica_FINAL
                 Console.WriteLine($" #{i++}. {item.Estudiante.Nombre} {item.Estudiante.Apellido} - Prom: {item.PromedioGeneral:F2}");
             }
         }
-
         private static void ReporteEstudiantesEnRiesgo()
         {
             MostrarTitulo("Reporte: Estudiantes en Riesgo (Promedio < 7.0)");
@@ -852,7 +420,6 @@ namespace SistemaGestionAcademica_FINAL
                 Console.WriteLine($" - {est.Nombre} {est.Apellido} (ID: {est.Identificacion})");
             }
         }
-
         private static void ReporteCursosPopulares()
         {
             MostrarTitulo("Reporte: Cursos Más Populares (por Inscritos)");
@@ -863,21 +430,18 @@ namespace SistemaGestionAcademica_FINAL
                 Console.WriteLine($" - {item.Curso}: {item.CantidadEstudiantes} Estudiante(s)");
             }
         }
-
         private static void ReportePromedioGeneral()
         {
             MostrarTitulo("Reporte: Promedio General de la Institución");
             decimal promGeneral = _gestor.ObtenerPromedioGeneral();
             MostrarExito($"El promedio general de todos los estudiantes es: {promGeneral:F2}");
         }
-
         private static void ReporteEstadisticasCarrera()
         {
             MostrarTitulo("Reporte: Estadísticas por Carrera");
             string reporte = _gestor.ObtenerEstadisticasPorCarrera();
             Console.WriteLine(reporte);
         }
-
         private static void ReporteIndividualEstudiante()
         {
             MostrarTitulo("Reporte Individual de Estudiante");
@@ -890,6 +454,7 @@ namespace SistemaGestionAcademica_FINAL
             catch (Exception ex)
             {
                 MostrarError(ex.Message);
+                Logger.Log($"Error en Reporte Individual: {ex.Message}", "ERROR");
             }
         }
 
@@ -916,7 +481,6 @@ namespace SistemaGestionAcademica_FINAL
                 }
             }
         }
-
         private static string LeerTextoRequerido(string mensaje)
         {
             string input;
@@ -934,7 +498,6 @@ namespace SistemaGestionAcademica_FINAL
                 }
             }
         }
-
         private static DateTime LeerFecha(string mensaje)
         {
             DateTime fecha;
@@ -951,7 +514,6 @@ namespace SistemaGestionAcademica_FINAL
                 }
             }
         }
-
         private static decimal LeerDecimal(string mensaje, decimal min, decimal max)
         {
             decimal valor;
@@ -969,7 +531,6 @@ namespace SistemaGestionAcademica_FINAL
                 }
             }
         }
-
         private static void Pausar()
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -977,29 +538,24 @@ namespace SistemaGestionAcademica_FINAL
             Console.ResetColor();
             Console.ReadLine();
         }
-
-        // --- Helpers de Colores ---
         private static void MostrarError(string mensaje)
         {
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine($"\n[ERROR] {mensaje}\n");
             Console.ResetColor();
         }
-
         private static void MostrarExito(string mensaje)
         {
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"\n[ÉXITO] {mensaje}\n");
             Console.ResetColor();
         }
-
         private static void MostrarMensaje(string mensaje, ConsoleColor color)
         {
             Console.ForegroundColor = color;
             Console.WriteLine($"\n{mensaje}\n");
             Console.ResetColor();
         }
-
         private static void MostrarTitulo(string titulo)
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
@@ -1018,13 +574,9 @@ namespace SistemaGestionAcademica_FINAL
     // =====================================================================
     // =====================================================================
 
-    /// <summary>
-    /// Implementación del script de demostración automatizado del Ejercicio 10.
-    /// Se ejecuta si el usuario elije "2" en el Main.
-    /// </summary>
     public static class DemoAutomatizada
     {
-        // CORREGIDO: Quitada la palabra 'readonly' para permitir asignación
+        // CORREGIDO: Quitada la palabra 'readonly'
         private static Repositorio<Estudiante> _repoEstudiantes;
         private static Repositorio<Profesor> _repoProfesores;
         private static Repositorio<Curso> _repoCursos;
@@ -1033,9 +585,6 @@ namespace SistemaGestionAcademica_FINAL
         private static AnalizadorReflection _analizador;
         private static Random _rand;
 
-        /// <summary>
-        /// Punto de entrada para la demo automatizada.
-        /// </summary>
         public static void Ejecutar(
             Repositorio<Estudiante> repoE,
             Repositorio<Profesor> repoP,
@@ -1045,7 +594,6 @@ namespace SistemaGestionAcademica_FINAL
             AnalizadorReflection analizador,
             Random rand)
         {
-            // Asigna las instancias compartidas
             _repoEstudiantes = repoE;
             _repoProfesores = repoP;
             _repoCursos = repoC;
@@ -1054,8 +602,16 @@ namespace SistemaGestionAcademica_FINAL
             _analizador = analizador;
             _rand = rand;
 
-            // 1. Poblar el sistema
-            GenerarDatosPrueba();
+            // 1. Poblar el sistema (solo si está vacío)
+            if (!_repoEstudiantes.ObtenerTodos().Any())
+            {
+                GenerarDatosPrueba();
+            }
+            else
+            {
+                Titulo("Datos ya cargados. Omitiendo generación...", ConsoleColor.Yellow);
+                Pausar();
+            }
 
             // 2. Ejecutar la demostración
             DemostrarFuncionalidades();
@@ -1068,7 +624,6 @@ namespace SistemaGestionAcademica_FINAL
             Titulo("Generando Datos de Prueba...", ConsoleColor.Yellow);
             try
             {
-                // --- 1. Agregar 5 Profesores ---
                 var p1 = new Profesor("P-101", "Carlos", "Perez", new DateTime(1980, 1, 1), "Ingeniería");
                 var p2 = new Profesor("P-102", "Maria", "Lopez", new DateTime(1985, 2, 2), "Derecho");
                 var p3 = new Profesor("P-103", "Juan", "Castro", new DateTime(1975, 3, 3), "Medicina");
@@ -1077,7 +632,6 @@ namespace SistemaGestionAcademica_FINAL
                 _repoProfesores.Agregar(p1); _repoProfesores.Agregar(p2); _repoProfesores.Agregar(p3); _repoProfesores.Agregar(p4); _repoProfesores.Agregar(p5);
                 Console.WriteLine(" > 5 Profesores agregados.");
 
-                // --- 2. Agregar 10 Cursos ---
                 var c1 = new Curso { Codigo = "CS-101", Nombre = "Programación I", Creditos = 4, ProfesorAsignado = p1 };
                 var c2 = new Curso { Codigo = "MAT-101", Nombre = "Cálculo I", Creditos = 5, ProfesorAsignado = p1 };
                 var c3 = new Curso { Codigo = "LAW-101", Nombre = "Derecho Romano", Creditos = 3, ProfesorAsignado = p2 };
@@ -1093,7 +647,6 @@ namespace SistemaGestionAcademica_FINAL
                 var listaCursos = _repoCursos.ObtenerTodos().ToList();
                 Console.WriteLine(" > 10 Cursos agregados.");
 
-                // --- 3. Agregar 15 Estudiantes ---
                 var estudiantes = new List<Estudiante>
                 {
                     new Estudiante("E-001", "Ana", "Gomez", new DateTime(2005, 1, 1), "Ing. de Software", "2024-0001"),
@@ -1115,7 +668,6 @@ namespace SistemaGestionAcademica_FINAL
                 foreach (var est in estudiantes) { _repoEstudiantes.Agregar(est); }
                 Console.WriteLine(" > 15 Estudiantes agregados.");
 
-                // --- 4. Realizar 30+ Matrículas ---
                 int countMatriculas = 0;
                 foreach (var est in estudiantes)
                 {
@@ -1126,8 +678,6 @@ namespace SistemaGestionAcademica_FINAL
                         {
                             _gestor.MatricularEstudiante(est.Identificacion, curso.Codigo);
                             countMatriculas++;
-
-                            // --- 5. Registrar 3-4 Calificaciones por Matrícula ---
                             int numCalificaciones = _rand.Next(3, 5);
                             for (int j = 0; j < numCalificaciones; j++)
                             {
@@ -1145,6 +695,7 @@ namespace SistemaGestionAcademica_FINAL
             catch (Exception ex)
             {
                 Error($"Error fatal al generar datos: {ex.Message}");
+                Logger.Log($"Error al generar datos: {ex.Message}", "FATAL");
             }
             Pausar();
         }
@@ -1293,14 +844,12 @@ namespace SistemaGestionAcademica_FINAL
             Console.WriteLine("====================================================================");
             Console.ResetColor();
         }
-
         private static void Subtitulo(string texto)
         {
             Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine($"\n--- {texto} ---");
             Console.ResetColor();
         }
-
         private static void Pausar()
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -1309,14 +858,12 @@ namespace SistemaGestionAcademica_FINAL
             Console.ReadLine();
             Console.Clear();
         }
-
         private static void Error(string mensaje)
         {
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine(mensaje);
             Console.ResetColor();
         }
-
         private static void Exito(string mensaje)
         {
             Console.ForegroundColor = ConsoleColor.Green;
@@ -1338,7 +885,7 @@ namespace SistemaGestionAcademica_FINAL
     /// Esta es la clase principal que contiene el ÚNICO punto de entrada (Main).
     /// Actúa como un "enrutador" para iniciar el Ej. 9 o el Ej. 10.
     /// </summary>
-    public class Program
+    public class Ejercicio9y10yBonusRestantes
     {
         // --- Almacenes de datos "Backend" GLOBALES (estáticos) ---
         // CORREGIDO: Todos los campos estáticos AHORA SÍ ESTÁN INICIALIZADOS.
@@ -1357,6 +904,18 @@ namespace SistemaGestionAcademica_FINAL
         {
             Console.OutputEncoding = Encoding.UTF8;
             Console.Title = "Sistema de Gestión Académica - COMPLETO";
+            Logger.Log("Inicio de la aplicación."); // <-- BONUS LOG
+
+            // --- BONUS: Autenticación ---
+            if (!Autenticar())
+            {
+                Thread.Sleep(1500);
+                Logger.Log("Autenticación fallida. Saliendo.", "WARN");
+                return; // Salir de la aplicación si falla el login
+            }
+
+            // --- BONUS: Cargar Datos ---
+            CargarDatos(); // Cargar datos de JSON si existen
 
             Console.WriteLine("Bienvenido al Sistema de Gestión Académica.");
             Console.ForegroundColor = ConsoleColor.Cyan;
@@ -1376,13 +935,7 @@ namespace SistemaGestionAcademica_FINAL
             {
                 // --- Ejecutar Ejercicio 9 ---
                 Console.Clear();
-                Console.WriteLine("Cargando datos de prueba para el menú...");
-                // Usamos el generador de datos del Ej. 10 para poblar el sistema
-                // Nota: Pasamos las instancias estáticas a la clase de la demo
-                DemoAutomatizada.Ejecutar(_repoEstudiantes, _repoProfesores, _repoCursos, _gestor, _validador, _analizador, _rand);
-                Console.WriteLine("¡Datos cargados! Iniciando menú...");
-                PausarSimple();
-
+                Logger.Log("Iniciando Menú Interactivo (Ej. 9).");
                 // Llamamos al método principal del Ej. 9
                 MenuInteractivo.Ejecutar(_repoEstudiantes, _repoProfesores, _repoCursos, _gestor, _analizador);
             }
@@ -1390,6 +943,7 @@ namespace SistemaGestionAcademica_FINAL
             {
                 // --- Ejecutar Ejercicio 10 ---
                 Console.Clear();
+                Logger.Log("Iniciando Demo Automatizada (Ej. 10).");
                 // Llamamos al método principal del Ej. 10
                 DemoAutomatizada.Ejecutar(_repoEstudiantes, _repoProfesores, _repoCursos, _gestor, _validador, _analizador, _rand);
             }
@@ -1400,19 +954,123 @@ namespace SistemaGestionAcademica_FINAL
                 Console.ResetColor();
             }
 
+            Logger.Log("Cierre de la aplicación.");
             Console.WriteLine("\nPrograma finalizado. Presione Enter para salir.");
             Console.ReadLine();
         }
 
         /// <summary>
-        /// Helper de pausa simple para el lanzador.
+        /// BONUS: Valida un usuario y contraseña (básico).
         /// </summary>
-        private static void PausarSimple()
+        private static bool Autenticar()
         {
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("\n(Presione Enter para continuar...)");
+            Console.Clear();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("=============================================");
+            Console.WriteLine("    SISTEMA DE GESTIÓN ACADÉMICA - LOGIN");
+            Console.WriteLine("=============================================");
             Console.ResetColor();
-            Console.ReadLine();
+
+            // Usuarios hardcodeados (user/pass)
+            var usuarios = new Dictionary<string, string>
+            {
+                { "admin", "1234" },
+                { "user", "pass" }
+            };
+
+            for (int i = 0; i < 3; i++) // 3 intentos
+            {
+                Console.Write("Usuario: ");
+                string user = Console.ReadLine();
+                Console.Write("Contraseña: ");
+                string pass = Console.ReadLine(); // (En una app real, esto se enmascararía)
+
+                if (usuarios.ContainsKey(user) && usuarios[user] == pass)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("\n¡Acceso concedido! Bienvenido.");
+                    Console.ResetColor();
+                    Logger.Log($"Inicio de sesión exitoso para el usuario: {user}");
+                    Thread.Sleep(1000); // Pequeña pausa
+                    return true;
+                }
+
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Credenciales incorrectas. Intentos restantes: {2 - i}");
+                Console.ResetColor();
+            }
+
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Demasiados intentos fallidos. Saliendo del sistema.");
+            Console.ResetColor();
+            Logger.Log("3 intentos de inicio de sesión fallidos.", "WARN");
+            return false;
+        }
+
+        /// <summary>
+        /// BONUS: Guarda el estado actual de los repositorios en archivos JSON.
+        /// </summary>
+        public static void GuardarDatos()
+        {
+            try
+            {
+                var options = new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    // Maneja referencias circulares (ej: Profesor en Curso y Curso en Profesor)
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve
+                };
+
+                File.WriteAllText("profesores.json", JsonSerializer.Serialize(_repoProfesores.ObtenerTodos(), options));
+                File.WriteAllText("estudiantes.json", JsonSerializer.Serialize(_repoEstudiantes.ObtenerTodos(), options));
+                File.WriteAllText("cursos.json", JsonSerializer.Serialize(_repoCursos.ObtenerTodos(), options));
+
+                // Nota: Las matrículas (la lógica del gestor) no se guardan,
+                // solo las entidades maestras.
+
+                Logger.Log("Datos guardados en JSON.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Error al guardar JSON: {ex.Message}", "ERROR");
+            }
+        }
+
+        /// <summary>
+        /// BONUS: Carga los datos desde los archivos JSON al iniciar.
+        /// </summary>
+        private static void CargarDatos()
+        {
+            try
+            {
+                var options = new JsonSerializerOptions
+                {
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve
+                };
+
+                // Es importante cargar Profesores primero
+                if (File.Exists("profesores.json"))
+                {
+                    var data = JsonSerializer.Deserialize<List<Profesor>>(File.ReadAllText("profesores.json"), options);
+                    foreach (var item in data) if (_repoProfesores.BuscarPorId(item.Identificacion) == null) _repoProfesores.Agregar(item);
+                }
+                if (File.Exists("estudiantes.json"))
+                {
+                    var data = JsonSerializer.Deserialize<List<Estudiante>>(File.ReadAllText("estudiantes.json"), options);
+                    foreach (var item in data) if (_repoEstudiantes.BuscarPorId(item.Identificacion) == null) _repoEstudiantes.Agregar(item);
+                }
+                if (File.Exists("cursos.json"))
+                {
+                    var data = JsonSerializer.Deserialize<List<Curso>>(File.ReadAllText("cursos.json"), options);
+                    foreach (var item in data) if (_repoCursos.BuscarPorId(item.Identificacion) == null) _repoCursos.Agregar(item);
+                }
+
+                Logger.Log("Datos cargados desde JSON.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Error al cargar JSON: {ex.Message}", "ERROR");
+            }
         }
     }
     #endregion
